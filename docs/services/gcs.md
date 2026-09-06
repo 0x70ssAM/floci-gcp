@@ -288,7 +288,9 @@ handles, or redirection. Unsupported RPCs return gRPC `UNIMPLEMENTED`.
 - `ListBuckets` (with `pageToken` pagination)
 - `UpdateBucket` / `PatchBucket`
 - `DeleteBucket`
-- `GetBucketIamPolicy` / `SetBucketIamPolicy` / `TestBucketIamPermissions`
+- `GetBucketIamPolicy` / `SetBucketIamPolicy`
+- `TestBucketIamPermissions`, `GET /b/{bucket}/iam/testPermissions?permissions=...` (the GCS
+  spelling); the Cloud IAM style `POST /b/{bucket}/iam:testPermissions` is also accepted
 
 **Bucket ACLs (REST JSON):**
 
@@ -296,6 +298,11 @@ handles, or redirection. Unsupported RPCs return gRPC `UNIMPLEMENTED`.
 - `GetBucketAcl` / `UpdateBucketAcl` / `DeleteBucketAcl`
 - `ListDefaultObjectAcl` / `CreateDefaultObjectAcl`
 - `GetDefaultObjectAcl` / `UpdateDefaultObjectAcl` / `DeleteDefaultObjectAcl`
+
+**Project resources (REST JSON):**
+
+- `GetServiceAccount` (`/storage/v1/projects/{project}/serviceAccount`), the principal
+  Cloud Storage publishes as; grant it publish rights before wiring notifications
 
 **Object operations (REST XML + REST JSON):**
 
