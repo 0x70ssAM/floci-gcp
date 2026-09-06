@@ -309,7 +309,8 @@ handles, or redirection. Unsupported RPCs return gRPC `UNIMPLEMENTED`.
 - `PutObject` (simple and multipart/resumable upload)
 - `GetObject`
 - `DeleteObject`
-- `ListObjects` (with `pageToken`, `prefix`, `delimiter` pagination)
+- `ListObjects` (with `pageToken`, `prefix`, `delimiter` pagination, plus `startOffset`,
+  `endOffset`, `matchGlob` and `includeTrailingDelimiter` filtering)
 - `CopyObject`
 - `MoveObject`
 - `HeadObject`
