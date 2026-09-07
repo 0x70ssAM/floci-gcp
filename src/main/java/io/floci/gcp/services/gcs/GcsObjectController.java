@@ -1,5 +1,6 @@
 package io.floci.gcp.services.gcs;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.gcp.config.EmulatorConfig;
 import io.floci.gcp.core.common.GcpException;
 import io.floci.gcp.core.common.PageToken;
@@ -37,13 +38,15 @@ public class GcsObjectController {
 
     private final GcsService service;
     private final EmulatorConfig config;
+    private final ObjectMapper objectMapper;
 	private final GcsAuthorizationService authorizationService;
 
     @Inject
-	public GcsObjectController(GcsService service, EmulatorConfig config,
+	public GcsObjectController(GcsService service, EmulatorConfig config, ObjectMapper objectMapper,
 			GcsAuthorizationService authorizationService) {
         this.service = service;
         this.config = config;
+        this.objectMapper = objectMapper;
 		this.authorizationService = authorizationService;
     }
 
@@ -63,13 +66,19 @@ public class GcsObjectController {
 			@QueryParam("endOffset") String endOffset,
 			@QueryParam("matchGlob") String matchGlob,
 			@QueryParam("includeTrailingDelimiter") @DefaultValue("false") boolean includeTrailingDelimiter,
+			@QueryParam("softDeleted") @DefaultValue("false") boolean softDeleted,
 			@HeaderParam(HttpHeaders.AUTHORIZATION) String authorization,
             @QueryParam("versions") @DefaultValue("false") boolean includeVersions) {
 		authorizationService.requireObjectList(authorization, bucket, prefix);
-        List<GcsObjectMeta> all = includeVersions
-                ? service.listObjectVersions(bucket, prefix)
-                : service.listObjects(bucket);
-        if (!includeVersions && prefix != null && !prefix.isBlank()) {
+        if (softDeleted && includeVersions) {
+            throw GcpException.invalidArgument("softDeleted and versions cannot both be set");
+        }
+        List<GcsObjectMeta> all = softDeleted
+                ? service.listSoftDeletedObjects(bucket, prefix)
+                : includeVersions
+                        ? service.listObjectVersions(bucket, prefix)
+                        : service.listObjects(bucket);
+        if (!includeVersions && !softDeleted && prefix != null && !prefix.isBlank()) {
             all = all.stream().filter(o -> o.getName().startsWith(prefix)).toList();
         }
         // startOffset is inclusive, endOffset exclusive.
@@ -341,6 +350,22 @@ public class GcsObjectController {
         return Response.noContent().build();
     }
 
+    /**
+     * {@code objects.restore}: brings a soft-deleted generation back to live.
+     *
+     * <p>Requires an explicit generation, as GCS does, a name alone is ambiguous once several
+     * generations of the same object have been soft-deleted.
+     */
+    @POST
+    @Path("/{object: .+}/restore")
+    public Response restoreObject(@PathParam("bucket") String bucket,
+            @PathParam("object") String objectPath,
+            @QueryParam("generation") String generation,
+			@HeaderParam(HttpHeaders.AUTHORIZATION) String authorization) {
+        authorizationService.requireObjectWrite(authorization, bucket, objectPath);
+        return Response.ok(service.restoreObject(bucket, objectPath, generation)).build();
+    }
+
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     @Path("/{destObject: .+}/compose")
@@ -428,21 +453,48 @@ public class GcsObjectController {
             @QueryParam("ifGenerationNotMatch") Long ifGenerationNotMatch,
             @QueryParam("ifMetagenerationMatch") Long ifMetagenerationMatch,
             @QueryParam("ifMetagenerationNotMatch") Long ifMetagenerationNotMatch,
-            @Context HttpHeaders headers) {
+            @QueryParam("maxBytesRewrittenPerCall") Long maxBytesRewrittenPerCall,
+            @QueryParam("rewriteToken") String rewriteToken,
+            @Context HttpHeaders headers,
+            String body) {
         authorizationService.requireSourceReadAndDestinationWrite(
                 headers.getHeaderString(HttpHeaders.AUTHORIZATION),
                 srcBucket, srcObjectPath, dstBucket, dstObjectPath);
         GcsObjectPreconditions preconditions = new GcsObjectPreconditions(ifGenerationMatch, ifGenerationNotMatch,
                 ifMetagenerationMatch, ifMetagenerationNotMatch);
-        GcsObjectMeta meta = service.copyObject(srcBucket, srcObjectPath, dstBucket, dstObjectPath,
-                preconditions, requestBaseUrl(headers));
+        var result = service.rewriteObject(srcBucket, srcObjectPath, dstBucket, dstObjectPath,
+                maxBytesRewrittenPerCall, rewriteToken, destinationStorageClass(body), preconditions,
+                requestBaseUrl(headers));
+
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("kind", "storage#rewriteResponse");
-        response.put("totalBytesRewritten", meta.getSize());
-        response.put("objectSize", meta.getSize());
-        response.put("done", true);
-        response.put("resource", meta);
+        response.put("totalBytesRewritten", String.valueOf(result.totalBytesRewritten()));
+        response.put("objectSize", String.valueOf(result.objectSize()));
+        response.put("done", result.done());
+        if (result.done()) {
+            response.put("resource", result.meta());
+        } else {
+            // The client loops on this token until the response comes back done.
+            response.put("rewriteToken", result.rewriteToken());
+        }
         return Response.ok(response).build();
+    }
+
+    // The rewrite body is the destination object's metadata. Read as a string rather than a
+    // bound Map so a client that sends no body and no Content-Type (the raw compat cases, and
+    // the SDKs' continuation calls) is not refused with 415. Only storageClass is honoured today;
+    // it decides whether the copy spans storage classes and what the destination lands with.
+    private String destinationStorageClass(String body) {
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        try {
+            Map<?, ?> metadata = objectMapper.readValue(body, Map.class);
+            return metadata.get("storageClass") instanceof String storageClass && !storageClass.isBlank()
+                    ? storageClass : null;
+        } catch (java.io.IOException e) {
+            throw GcpException.invalidArgument("invalid rewrite request body");
+        }
     }
 
     private String requestBaseUrl(HttpHeaders headers) {
