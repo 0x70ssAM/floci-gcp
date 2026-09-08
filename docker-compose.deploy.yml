@@ -6,12 +6,17 @@ services:
     ports:
       - "0.0.0.0:80:4588"
       - "0.0.0.0:443:4588"
+    command: ["/bin/sh", "/deploy-entrypoint.sh"]
     volumes:
       - ./data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker/deploy-entrypoint.sh:/deploy-entrypoint.sh:ro
     environment:
-      FLOCI_GCP_HOSTNAME: 8.213.86.234
-      FLOCI_GCP_BASE_URL: http://8.213.86.234
+      # FLOCI_GCP_HOSTNAME / FLOCI_GCP_BASE_URL are intentionally unset here —
+      # docker/deploy-entrypoint.sh auto-detects this host's public IP at
+      # container start and sets them, so this file works unchanged no matter
+      # what public IP the VM/sandbox is handed. Set them explicitly to
+      # override auto-detection.
       FLOCI_GCP_STORAGE_MODE: hybrid
       FLOCI_GCP_SERVICES_DOCKER_NETWORK: floci_gcp_deploy_default
       # HTTP and HTTPS share port 4588, so plain-HTTP clients are unaffected.
