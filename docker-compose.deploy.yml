@@ -1,0 +1,30 @@
+services:
+  floci-gcp:
+    image: floci/floci-gcp:latest
+    restart: unless-stopped
+    tty: true
+    ports:
+      - "0.0.0.0:80:4588"
+      - "0.0.0.0:443:4588"
+    volumes:
+      - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      FLOCI_GCP_HOSTNAME: 8.213.86.234
+      FLOCI_GCP_BASE_URL: http://8.213.86.234
+      FLOCI_GCP_STORAGE_MODE: hybrid
+      FLOCI_GCP_SERVICES_DOCKER_NETWORK: floci_gcp_deploy_default
+      # HTTP and HTTPS share port 4588, so plain-HTTP clients are unaffected.
+      # The container runs unprivileged, so the extra 443 binding inside the
+      # container is disabled; we map both host ports 80 and 443 to it instead.
+      FLOCI_GCP_TLS_ENABLED: "true"
+      FLOCI_GCP_TLS_HTTPS_PORT: "0"
+    networks:
+      floci_gcp_deploy_default:
+        aliases:
+          - localhost.floci.io
+          - container.localhost.floci.io
+
+networks:
+  floci_gcp_deploy_default:
+    name: floci_gcp_deploy_default
